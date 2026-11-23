@@ -1,0 +1,5 @@
+[Unit]
+Description=Bitcart coin RPC network (bitcoin, monero, backend, worker)
+
+[Network]
+NetworkName=bitcart-coins

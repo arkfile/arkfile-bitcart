@@ -1,0 +1,27 @@
+[Unit]
+Description=Bitcart internal Caddy gateway (rootless)
+After=bitcart-backend.service bitcart-checkout.service
+Requires=bitcart-backend.service bitcart-checkout.service
+
+[Container]
+Image=__IMAGE_GATEWAY__
+ContainerName=gateway
+Network=bitcart-edge.network
+PublishPort=127.0.0.1:28080:28080
+PublishPort=127.0.0.1:29080:29080
+Volume=/home/bitcart/config/Caddyfile.gateway:/etc/caddy/Caddyfile:ro,Z
+DropCapability=ALL
+NoNewPrivileges=true
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:29080/api/cryptos
+HealthInterval=20s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=15s
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+MemoryMax=64M
+
+[Install]
+WantedBy=default.target

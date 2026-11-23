@@ -1,0 +1,22 @@
+[Unit]
+Description=Bitcart Checkout static web UI (rootless)
+After=bitcart-backend.service
+Wants=bitcart-backend.service
+
+[Container]
+Image=__IMAGE_CHECKOUT__
+ContainerName=checkout
+Network=bitcart-edge.network
+EnvironmentFile=/home/bitcart/secrets/checkout.env
+Volume=/home/bitcart/config/checkout-privacy.conf:/etc/nginx/conf.d/00-privacy.conf:ro,Z
+DropCapability=ALL
+AddCapability=CHOWN DAC_OVERRIDE NET_BIND_SERVICE SETGID SETUID
+NoNewPrivileges=true
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+MemoryMax=96M
+
+[Install]
+WantedBy=default.target

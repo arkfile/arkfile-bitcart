@@ -1,0 +1,33 @@
+[Unit]
+Description=Bitcart Merchants API backend (rootless)
+After=bitcart-database.service bitcart-redis.service bitcart-bitcoin.service bitcart-monero.service
+Requires=bitcart-database.service bitcart-redis.service bitcart-bitcoin.service
+Wants=bitcart-monero.service
+
+[Container]
+Image=__IMAGE_BACKEND__
+ContainerName=backend
+Exec=just prod-api-up
+Network=bitcart-edge.network
+Network=bitcart-data.network
+Network=bitcart-coins.network
+EnvironmentFile=/home/bitcart/secrets/backend.env
+Volume=bitcart-datadir.volume:/datadir
+Volume=bitcart-backups.volume:/backups
+Volume=bitcart-plugins.volume:/plugins
+DropCapability=ALL
+AddCapability=CHOWN DAC_OVERRIDE SETGID SETUID
+HealthCmd=python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/cryptos',timeout=3).read()"
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=10
+HealthStartPeriod=45s
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=180
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,5 @@
+[Unit]
+Description=Bitcart shared backend and worker data volume
+
+[Volume]
+VolumeName=bitcart-datadir

@@ -1,0 +1,5 @@
+[Unit]
+Description=Bitcart writable plugins volume
+
+[Volume]
+VolumeName=bitcart-plugins

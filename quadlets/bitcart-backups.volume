@@ -1,0 +1,5 @@
+[Unit]
+Description=Bitcart shared backups volume
+
+[Volume]
+VolumeName=bitcart-backups

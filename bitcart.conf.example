@@ -1,0 +1,63 @@
+# arkfile-bitcart operator configuration template
+# Copy to /etc/arkfile-bitcart/bitcart.conf and restrict permissions:
+#   sudo install -d -m 0700 /etc/arkfile-bitcart
+#   sudo install -m 0600 bitcart.conf.example /etc/arkfile-bitcart/bitcart.conf
+#
+# Mainnet only. Watch-only wallet keys only. Never place spending private keys
+# or seed phrases (xprv/yprv/zprv/tprv/uprv/vprv or Monero spend keys) in this file.
+
+# Public domain served by host Caddy with automatic Let's Encrypt TLS 1.3.
+# Point both A (and optionally AAAA) DNS records to this VPS before deploy.
+PAY_DOMAIN=pay.example.com
+
+# Enabled cryptocurrencies (comma-separated, mainnet only).
+# Supported values: btc,xmr or btc
+BITCART_CRYPTOS=btc,xmr
+
+# External Bitcoin Electrum server (host:port:s for TLS).
+# Electrum /data/config is always seeded with {"auto_connect": false} so wallet
+# subscriptions never silently fail over to random public Electrum peers.
+BTC_SERVER=bitcoin-mainnet.blockstream.info:50002:s
+
+# Keep BTC_ONESERVER=false when using a public Electrum server so Electrum can
+# still cross-check SPV block headers across peers without leaking wallet
+# scripthashes. Set BTC_ONESERVER=true when BTC_SERVER is your own Electrum server.
+BTC_ONESERVER=false
+
+# External Monero daemon URL(s), comma-separated (mainnet only).
+XMR_SERVER=https://xmr-node.cakewallet.com:18081
+
+# Required confirmation floors enforced by Arkfile at invoice creation time.
+# BTC_TX_SPEED must be >= 1; XMR_TX_SPEED must be >= 5.
+BTC_TX_SPEED=1
+XMR_TX_SPEED=5
+
+# Bitcart internal log retention policy in days.
+BITCART_LOG_RETENTION_DAYS=21
+
+# Primary production tenant (prod@pay.internal -> store "arkfile-prod").
+# Use a mainnet BIP84 watch-only account extended public key (zpub..., or xpub/ypub).
+PROD_BTC_XPUB=
+# Mainnet Monero primary address (starts with 4, 95 characters), private view key
+# (64 hex characters), and integer wallet restore block height.
+PROD_XMR_ADDRESS=
+PROD_XMR_PRIVATE_VIEW_KEY=
+PROD_XMR_RESTORE_HEIGHT=
+
+# Optional isolated test tenant (test@pay.internal -> store "arkfile-test").
+# Leave ENABLE_TEST_TENANT=false and TEST_BTC_XPUB empty for single-tenant prod
+# deployments. Setting ENABLE_TEST_TENANT=true or supplying TEST_BTC_XPUB enables
+# the second isolated non-superuser tenant. Use a separate mainnet BIP84 account
+# zpub and separate Monero wallet/account from prod.
+ENABLE_TEST_TENANT=false
+TEST_BTC_XPUB=
+TEST_XMR_ADDRESS=
+TEST_XMR_PRIVATE_VIEW_KEY=
+TEST_XMR_RESTORE_HEIGHT=
+
+# Backup settings used by scripts/backup.sh.
+BACKUP_DIR=/var/backups/arkfile-bitcart
+BACKUP_RETENTION_DAYS=14
+# Optional off-host encryption recipient for backups (set at most one).
+BACKUP_AGE_RECIPIENT=
+BACKUP_GPG_RECIPIENT=

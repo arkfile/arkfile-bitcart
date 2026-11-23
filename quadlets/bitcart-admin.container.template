@@ -1,0 +1,21 @@
+[Unit]
+Description=Bitcart Admin UI (optional on-demand, SSH tunnel only)
+After=bitcart-backend.service bitcart-gateway.service
+Requires=bitcart-backend.service
+
+[Container]
+# Intentionally omits [Install] so the admin UI stays stopped by default.
+# Start on demand when troubleshooting via SSH port forwarding:
+#   systemctl --user -M bitcart@ start bitcart-admin
+Image=__IMAGE_ADMIN__
+ContainerName=admin
+Exec=yarn start
+Network=bitcart-edge.network
+EnvironmentFile=/home/bitcart/secrets/admin.env
+DropCapability=ALL
+NoNewPrivileges=true
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+MemoryMax=256M

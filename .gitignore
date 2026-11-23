@@ -1,0 +1,37 @@
+# Operator configuration and generated secrets (never commit real domains, keys, or tokens)
+bitcart.conf
+*.conf.local
+.env
+.env.*
+*.env
+!images.env
+secrets/
+credentials/
+
+# Rendered runtime artifacts and temporary files
+caddy/Caddyfile.host
+quadlets/*.container
+*.tmp
+*.tmp.*
+*.bak
+
+# Backups, database dumps, and key material
+backups/
+*.sql
+*.dump
+*.tar.gz
+*.tar.gz.age
+*.tar.gz.gpg
+*.age
+*.gpg
+*.pem
+*.key
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

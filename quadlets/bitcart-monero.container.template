@@ -1,0 +1,25 @@
+[Unit]
+Description=Bitcart watch-only Monero RPC daemon (rootless)
+After=network-online.target
+
+[Container]
+Image=__IMAGE_MONERO__
+ContainerName=monero
+Network=bitcart-coins.network
+EnvironmentFile=/home/bitcart/secrets/monero.env
+Volume=bitcart-xmr-data.volume:/data
+DropCapability=ALL
+AddCapability=CHOWN DAC_OVERRIDE SETGID SETUID
+HealthCmd=python3 -c "import socket; s=socket.create_connection(('127.0.0.1', 5011), 3); s.close()"
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+MemoryMax=320M
+
+[Install]
+WantedBy=default.target

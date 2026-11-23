@@ -1,0 +1,27 @@
+[Unit]
+Description=Bitcart PostgreSQL database (rootless)
+After=network-online.target
+
+[Container]
+Image=__IMAGE_DATABASE__
+ContainerName=database
+Network=bitcart-data.network
+EnvironmentFile=/home/bitcart/secrets/postgres.env
+Volume=bitcart-pgdata.volume:/var/lib/postgresql/data
+Exec=postgres -c shared_buffers=128MB -c random_page_cost=1.1 -c max_connections=50
+DropCapability=ALL
+AddCapability=CHOWN DAC_OVERRIDE FOWNER SETGID SETUID
+HealthCmd=pg_isready -U postgres -d bitcart
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=20s
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120
+MemoryMax=320M
+
+[Install]
+WantedBy=default.target

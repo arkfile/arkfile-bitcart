@@ -1,0 +1,6 @@
+[Unit]
+Description=Bitcart internal data network (database, redis, backend, worker)
+
+[Network]
+NetworkName=bitcart-data
+Internal=true

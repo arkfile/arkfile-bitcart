@@ -1,0 +1,5 @@
+[Unit]
+Description=Bitcart PostgreSQL data volume
+
+[Volume]
+VolumeName=bitcart-pgdata

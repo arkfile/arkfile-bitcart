@@ -1,0 +1,5 @@
+[Unit]
+Description=Bitcart edge network (gateway, checkout, admin, backend)
+
+[Network]
+NetworkName=bitcart-edge

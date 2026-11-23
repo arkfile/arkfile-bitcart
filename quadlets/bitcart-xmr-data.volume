@@ -1,0 +1,5 @@
+[Unit]
+Description=Bitcart watch-only Monero daemon data volume
+
+[Volume]
+VolumeName=bitcart-xmr-data
