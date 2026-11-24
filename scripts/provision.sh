@@ -116,24 +116,40 @@ api_request() {
 	rm -f "${tmp_body}" "${tmp_cfg}"
 }
 
-validate_tenant_store_json() {
+# PublicStore, returned for an invoice_management token. currency_data is fiat
+# divisibility metadata, and wallets are omitted.
+validate_public_store_json() {
 	local store_json="$1"
 	local expected_btc_speed="$2"
 
 	jq -e --argjson btc_speed "${expected_btc_speed}" '
-		((.wallets // null) | type == "array" and length > 0) and
+		((.default_currency | ascii_upcase) == "USD") and
 		(.checkout_settings.expiration == 60) and
 		(.checkout_settings.transaction_speed == $btc_speed) and
 		(.checkout_settings.underpaid_percentage == 0) and
 		(.checkout_settings.email_required == false) and
-		(.checkout_settings.allow_anonymous_invoice_creation == false) and
-		(((.currency_data // {}) | to_entries | map(select((.key | ascii_downcase) == "btc" and (.value > 0))) | length) > 0)
-	' >/dev/null <<< "${store_json}" || return 1
+		(.checkout_settings.allow_anonymous_invoice_creation == false)
+	' >/dev/null <<< "${store_json}"
+}
 
-	if has_crypto "xmr"; then
-		jq -e '(((.currency_data // {}) | to_entries | map(select((.key | ascii_downcase) == "xmr" and (.value > 0))) | length) > 0)' >/dev/null <<< "${store_json}" || return 1
+# DisplayStore, returned for the tenant full_control token. wallets is a list
+# of wallet IDs.
+validate_tenant_store_json() {
+	local store_json="$1"
+	local expected_btc_speed="$2"
+	local btc_wallet_id="$3"
+	local xmr_wallet_id="${4:-}"
+
+	validate_public_store_json "${store_json}" "${expected_btc_speed}" || return 1
+	if has_crypto "xmr" && [[ -z "${xmr_wallet_id}" ]]; then
+		return 1
 	fi
-	return 0
+
+	jq -e --arg btc "${btc_wallet_id}" --arg xmr "${xmr_wallet_id}" '
+		(.wallets | type == "array") and
+		([.wallets[] | if type == "object" then .id else . end] | index($btc) != null) and
+		($xmr == "" or ([.wallets[] | if type == "object" then .id else . end] | index($xmr) != null))
+	' >/dev/null <<< "${store_json}"
 }
 
 write_tenant_credentials() {
@@ -185,7 +201,7 @@ check_existing_token_valid() {
 
 	api_request "GET" "/stores/${store_id}" "${token}"
 	[[ "${HTTP_STATUS}" == "200" ]] || return 1
-	validate_tenant_store_json "${HTTP_BODY}" "${BTC_TX_SPEED}" || return 1
+	validate_public_store_json "${HTTP_BODY}" "${BTC_TX_SPEED}" || return 1
 	return 0
 }
 
@@ -468,12 +484,12 @@ provision_tenant() {
 		log_ok "Updated store ${store_name} (${store_id})."
 	fi
 
-	# Verify connected wallets in currency_data.
+	# Verify checkout settings and attached wallet IDs on the DisplayStore response.
 	api_request "GET" "/stores/${store_id}" "${tenant_token}"
 	[[ "${HTTP_STATUS}" == "200" ]] || die "Failed to read store ${store_id} (HTTP ${HTTP_STATUS}): ${HTTP_BODY}"
-	validate_tenant_store_json "${HTTP_BODY}" "${BTC_TX_SPEED}" \
-		|| die "Store ${store_name} (${store_id}) failed checkout_settings or currency_data verification: ${HTTP_BODY}"
-	log_ok "Verified store ${store_name} currency_data and checkout_settings."
+	validate_tenant_store_json "${HTTP_BODY}" "${BTC_TX_SPEED}" "${btc_wallet_id}" "${xmr_wallet_id:-}" \
+		|| die "Store ${store_name} (${store_id}) failed checkout_settings or wallet verification: ${HTTP_BODY}"
+	log_ok "Verified store ${store_name} checkout_settings and attached wallets."
 
 	# Preserve existing valid invoice_management token unless --rotate-tokens was passed.
 	local saved_file="${BITCART_SECRETS_DIR}/${env_name}-arkfile.env"

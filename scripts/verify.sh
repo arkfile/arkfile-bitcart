@@ -134,6 +134,21 @@ check_host_and_rootless() {
 	fi
 }
 
+# PublicStore from an invoice_management token. transaction_speed must be at
+# least 1. currency_data is fiat divisibility and is not a coin map.
+validate_public_store_json() {
+	local store_json="$1"
+
+	jq -e '
+		((.default_currency | ascii_upcase) == "USD") and
+		(.checkout_settings.expiration == 60) and
+		(.checkout_settings.transaction_speed >= 1) and
+		(.checkout_settings.underpaid_percentage == 0) and
+		(.checkout_settings.email_required == false) and
+		(.checkout_settings.allow_anonymous_invoice_creation == false)
+	' >/dev/null <<< "${store_json}"
+}
+
 check_store_config() {
 	local env_name="$1"
 	local store_id="$2"
@@ -145,23 +160,31 @@ check_store_config() {
 		return
 	fi
 
-	if jq -e '
-		(.checkout_settings.transaction_speed >= 1) and
-		(.checkout_settings.underpaid_percentage == 0) and
-		(.checkout_settings.email_required == false) and
-		(.checkout_settings.allow_anonymous_invoice_creation == false) and
-		(((.currency_data // {}) | to_entries | map(select((.key | ascii_downcase) == "btc" and (.value > 0))) | length) > 0)
-	' >/dev/null <<< "${HTTP_BODY}"; then
-		pass "${env_name} store settings verified (BTC speed >= 1, underpaid=0, no email, no anonymous invoices, btc connected)."
+	if validate_public_store_json "${HTTP_BODY}"; then
+		pass "${env_name} store settings verified (USD, expiration 60, BTC speed >= 1, underpaid=0, no email, no anonymous invoices)."
 	else
-		fail "${env_name} store settings or btc currency_data check failed."
+		fail "${env_name} store checkout settings check failed."
+	fi
+}
+
+check_enabled_cryptos() {
+	public_request "GET" "/api/cryptos"
+	if [[ "${HTTP_STATUS}" != "200" ]]; then
+		fail "GET /api/cryptos returned HTTP ${HTTP_STATUS} (expected 200)."
+		return
+	fi
+
+	if jq -e '[.result[]? | ascii_downcase] | index("btc") != null' >/dev/null <<< "${HTTP_BODY}"; then
+		pass "GET /api/cryptos includes btc."
+	else
+		fail "GET /api/cryptos does not include btc."
 	fi
 
 	if has_crypto "xmr"; then
-		if jq -e '(((.currency_data // {}) | to_entries | map(select((.key | ascii_downcase) == "xmr" and (.value > 0))) | length) > 0)' >/dev/null <<< "${HTTP_BODY}"; then
-			pass "${env_name} store currency_data confirms xmr wallet connected."
+		if jq -e '[.result[]? | ascii_downcase] | index("xmr") != null' >/dev/null <<< "${HTTP_BODY}"; then
+			pass "GET /api/cryptos includes xmr."
 		else
-			fail "${env_name} store currency_data missing xmr."
+			fail "GET /api/cryptos does not include xmr."
 		fi
 	fi
 }
@@ -289,11 +312,12 @@ main() {
 		fail "GET /api/invoices/count without token returned HTTP ${HTTP_STATUS} (expected 401)."
 	fi
 
-	# 2. Store checkout settings and connected coin verification.
+	# 2. Store checkout settings and enabled coins.
 	check_store_config "prod" "${prod_store}" "${prod_tok}"
 	if is_test_tenant_enabled; then
 		check_store_config "test" "${test_store}" "${test_tok}"
 	fi
+	check_enabled_cryptos
 
 	# 3. Unauthenticated invoice creation must be rejected (403).
 	local anon_prod_payload
