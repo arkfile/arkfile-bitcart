@@ -3,14 +3,14 @@ Description=Bitcart Redis broker on internal network (rootless)
 After=network-online.target
 
 [Container]
-# Bitcart api/settings.py reads REDIS_HOST, REDIS_PORT, and REDIS_DB without a
-# separate REDIS_PASSWORD field. Keep Redis strictly isolated on the internal
-# bitcart-data network with protected mode enabled and no published ports.
+# Bitcart has no Redis password setting. Protected mode would reject backend
+# and worker on the bridge network, so it is disabled. Redis stays reachable
+# only by containers on the internal bitcart-data network, with no published ports.
 Image=__IMAGE_REDIS__
 ContainerName=redis
 Network=bitcart-data.network
 User=redis
-Exec=redis-server --protected-mode yes --save "" --appendonly no
+Exec=redis-server --protected-mode no --save "" --appendonly no
 DropCapability=ALL
 NoNewPrivileges=true
 HealthCmd=redis-cli ping
