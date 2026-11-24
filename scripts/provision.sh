@@ -152,11 +152,16 @@ EOF
 	local out_file="${CREDS_OUT_DIR}/${env_name}-secrets.env"
 	local tmp_out="${out_file}.tmp.$$"
 	cat > "${tmp_out}" <<EOF
-# Ready-to-copy Arkfile secrets.env snippet for ${env_name} (${PAY_DOMAIN})
-BITCART_API_URL=https://${PAY_DOMAIN}/api
-BITCART_CHECKOUT_URL=https://${PAY_DOMAIN}
-BITCART_STORE_ID=${store_id}
-BITCART_API_TOKEN=${token}
+# Ready-to-copy Arkfile secrets.env snippet for ${env_name} (${PAY_DOMAIN}).
+# Copy these lines as-is into the existing /opt/arkfile/etc/secrets.env.
+# Edit the top-up limits below before applying this file if needed.
+ARKFILE_PAYMENTS_ENABLED=true
+ARKFILE_MIN_TOP_UP_USD=0.50
+ARKFILE_MAX_TOP_UP_USD=1000.00
+ARKFILE_BITCART_API_URL=https://${PAY_DOMAIN}/api
+ARKFILE_BITCART_CHECKOUT_URL=https://${PAY_DOMAIN}
+ARKFILE_BITCART_STORE_ID=${store_id}
+ARKFILE_BITCART_API_TOKEN=${token}
 EOF
 	chmod 0600 "${tmp_out}"
 	mv -f "${tmp_out}" "${out_file}"
