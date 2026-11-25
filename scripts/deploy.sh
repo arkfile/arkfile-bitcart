@@ -77,9 +77,10 @@ main() {
 	run_bitcart_systemctl start bitcart-checkout.service
 	run_bitcart_systemctl start bitcart-gateway.service
 
-	log_info "Step 6: Enabling and reloading host caddy.service..."
+	log_info "Step 6: Enabling and restarting host caddy.service..."
 	systemctl enable --now caddy.service
-	systemctl reload caddy.service
+	# admin off in the host Caddyfile, so reload cannot reach the admin endpoint.
+	systemctl restart caddy.service
 
 	wait_for_local_api 150
 

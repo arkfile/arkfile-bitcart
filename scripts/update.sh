@@ -78,7 +78,8 @@ main() {
 		run_bitcart_systemctl restart bitcart-admin.service
 	fi
 
-	systemctl reload caddy.service
+	# admin off in the host Caddyfile, so reload cannot reach the admin endpoint.
+	systemctl restart caddy.service
 	wait_for_local_api 150
 
 	log_info "Re-running idempotent provisioner (existing valid tokens preserved)..."

@@ -260,11 +260,15 @@ run_bitcart_podman() {
 	ensure_bitcart_user_ready
 	local uid
 	uid="$(get_bitcart_uid)"
-	runuser -u "${BITCART_USER}" -- env \
-		HOME="${BITCART_HOME}" \
-		XDG_RUNTIME_DIR="/run/user/${uid}" \
-		DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
-		podman "$@"
+	# runuser keeps the caller's working directory. The bitcart user cannot enter /root.
+	(
+		cd /tmp || exit 1
+		runuser -u "${BITCART_USER}" -- env \
+			HOME="${BITCART_HOME}" \
+			XDG_RUNTIME_DIR="/run/user/${uid}" \
+			DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+			podman "$@"
+	)
 }
 
 run_bitcart_systemctl() {
