@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Idempotent multi-tenant Bitcart API provisioner for arkfile-bitcart.
+# Idempotent Bitcart API provisioner for arkfile-bitcart.
 # Talks exclusively to http://127.0.0.1:29080/api and configures:
 #   - superadmin@pay.internal (superuser, global policy lockdown only)
-#   - prod@pay.internal (non-superuser, store "arkfile-prod", invoice_management token)
-#   - test@pay.internal (optional non-superuser, store "arkfile-test", invoice_management token)
+#   - prod@pay.internal when prod watch-only keys are set (store "arkfile-prod")
+#   - test@pay.internal when test watch-only keys are set (store "arkfile-test")
+# A tenant that is not requested on this run is left in place.
 
 set -euo pipefail
 
@@ -42,6 +43,8 @@ validate_operator_conf
 ensure_bitcart_user_ready
 
 # Ensure accounts.env exists with generated high-entropy passwords.
+# Both tenant passwords are created even when that tenant is not requested yet,
+# so a later enable reuses the same password.
 ensure_account_passwords() {
 	install -d -m 0700 -o "${BITCART_USER}" -g "${BITCART_USER}" "${BITCART_SECRETS_DIR}"
 	local acct_file="${BITCART_SECRETS_DIR}/accounts.env"
@@ -210,24 +213,29 @@ try_fast_path() {
 		return 1
 	fi
 
-	local prod_file="${BITCART_SECRETS_DIR}/prod-arkfile.env"
-	[[ -f "${prod_file}" ]] || return 1
+	local prod_store="" prod_tok="" test_store="" test_tok=""
 
-	local prod_store prod_tok
-	prod_store="$(read_existing_key "${prod_file}" "BITCART_STORE_ID")"
-	prod_tok="$(read_existing_key "${prod_file}" "BITCART_API_TOKEN")"
-	check_existing_token_valid "prod" "${prod_store}" "${prod_tok}" || return 1
+	# Only enabled tenants participate. A missing credential file or a token
+	# that fails check_existing_token_valid misses the fast path so full
+	# provisioning can create that tenant. Unrequested tenants are not read.
+	if is_prod_tenant_enabled; then
+		local prod_file="${BITCART_SECRETS_DIR}/prod-arkfile.env"
+		[[ -f "${prod_file}" ]] || return 1
+		prod_store="$(read_existing_key "${prod_file}" "BITCART_STORE_ID")"
+		prod_tok="$(read_existing_key "${prod_file}" "BITCART_API_TOKEN")"
+		check_existing_token_valid "prod" "${prod_store}" "${prod_tok}" || return 1
+	fi
 
 	if is_test_tenant_enabled; then
 		local test_file="${BITCART_SECRETS_DIR}/test-arkfile.env"
 		[[ -f "${test_file}" ]] || return 1
-
-		local test_store test_tok
 		test_store="$(read_existing_key "${test_file}" "BITCART_STORE_ID")"
 		test_tok="$(read_existing_key "${test_file}" "BITCART_API_TOKEN")"
 		check_existing_token_valid "test" "${test_store}" "${test_tok}" || return 1
+	fi
 
-		# Confirm cross-tenant isolation in fast-path as well (POST /invoices returns 403).
+	# Authorization probes only. A 403 means no invoice was created.
+	if is_prod_tenant_enabled && is_test_tenant_enabled; then
 		local probe_prod probe_test
 		probe_prod="$(jq -n --arg sid "${prod_store}" '{price: 1, currency: "USD", store_id: $sid}')"
 		probe_test="$(jq -n --arg sid "${test_store}" '{price: 1, currency: "USD", store_id: $sid}')"
@@ -235,11 +243,14 @@ try_fast_path() {
 		[[ "${HTTP_STATUS}" == "403" ]] || return 1
 		api_request "POST" "/invoices" "${prod_tok}" "${probe_test}"
 		[[ "${HTTP_STATUS}" == "403" ]] || return 1
-
-		write_tenant_credentials "test" "${test_store}" "${test_tok}"
 	fi
 
-	write_tenant_credentials "prod" "${prod_store}" "${prod_tok}"
+	if is_prod_tenant_enabled; then
+		write_tenant_credentials "prod" "${prod_store}" "${prod_tok}"
+	fi
+	if is_test_tenant_enabled; then
+		write_tenant_credentials "test" "${test_store}" "${test_tok}"
+	fi
 	log_ok "Fast-path passed: existing tenant stores, checkout settings, and API tokens are already valid."
 	return 0
 }
@@ -521,16 +532,23 @@ main() {
 
 	bootstrap_superadmin
 
-	ensure_tenant_user "prod@pay.internal" "${PROD_ADMIN_PASSWORD}"
+	# Create only requested tenants. An existing tenant that is not requested
+	# is not deleted: its user, store, wallet, token, and credential file stay.
+	if is_prod_tenant_enabled; then
+		ensure_tenant_user "prod@pay.internal" "${PROD_ADMIN_PASSWORD}"
+		provision_tenant "prod" "PROD" "${PROD_ADMIN_PASSWORD}"
+	else
+		log_info "Prod tenant is not requested; leaving any existing prod user, store, wallet, token, and credential file unchanged."
+	fi
 	if is_test_tenant_enabled; then
 		ensure_tenant_user "test@pay.internal" "${TEST_ADMIN_PASSWORD}"
+		provision_tenant "test" "TEST" "${TEST_ADMIN_PASSWORD}"
+	else
+		log_info "Test tenant is not requested; leaving any existing test user, store, wallet, token, and credential file unchanged."
 	fi
 
-	provision_tenant "prod" "PROD" "${PROD_ADMIN_PASSWORD}"
-	if is_test_tenant_enabled; then
-		provision_tenant "test" "TEST" "${TEST_ADMIN_PASSWORD}"
-
-		# Confirm cross-tenant store isolation immediately after provisioning.
+	# Authorization probes only. A 403 means no invoice was created.
+	if is_prod_tenant_enabled && is_test_tenant_enabled; then
 		local probe_prod probe_test
 		probe_prod="$(jq -n --arg sid "${PROVISIONED_PROD_STORE_ID}" '{price: 1, currency: "USD", store_id: $sid}')"
 		probe_test="$(jq -n --arg sid "${PROVISIONED_TEST_STORE_ID}" '{price: 1, currency: "USD", store_id: $sid}')"
@@ -545,7 +563,13 @@ main() {
 		log_ok "Verified cross-tenant store isolation between prod and test."
 	fi
 
-	log_ok "Bitcart multi-tenant provisioning complete."
+	if is_prod_tenant_enabled && is_test_tenant_enabled; then
+		log_ok "Bitcart tenant provisioning complete for prod and test."
+	elif is_prod_tenant_enabled; then
+		log_ok "Bitcart tenant provisioning complete for prod."
+	else
+		log_ok "Bitcart tenant provisioning complete for test."
+	fi
 }
 
 main "$@"

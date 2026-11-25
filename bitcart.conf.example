@@ -35,7 +35,27 @@ XMR_TX_SPEED=5
 # Bitcart internal log retention policy in days.
 BITCART_LOG_RETENTION_DAYS=21
 
-# Primary production tenant (prod@pay.internal -> store "arkfile-prod").
+# Tenants are provisioned only when their watch-only keys are set.
+# Prod-only, test-only, and both are valid. At least one tenant's watch-only
+# keys are required. A partial tenant (some of that tenant's keys empty) is
+# rejected. Leave the other tenant's fields empty to skip it. An unrequested
+# tenant is not deleted on a later run.
+#
+# A test-only first deploy (TEST_* filled, every PROD_* wallet field empty)
+# validates this stack against a test Arkfile host (test.example.com) before
+# any production keys are placed on this VPS. Add prod later by filling PROD_*
+# and running scripts/update.sh. That creates only the missing prod tenant and
+# preserves the existing tenant's PostgreSQL data, wallets, store, and
+# invoice_management token.
+#
+# Prod is requested when PROD_BTC_XPUB or any PROD_XMR_* field is non-empty.
+# Test is requested when ENABLE_TEST_TENANT=true (any case) or TEST_BTC_XPUB
+# or any TEST_XMR_* field is non-empty. When BITCART_CRYPTOS includes xmr, a
+# requested tenant must include a mainnet primary address, a 64-hex private
+# view key, and an integer restore height if a height is set.
+
+# Production tenant (prod@pay.internal -> store "arkfile-prod").
+# Leave every PROD_* field empty for a test-only deployment.
 # Use a mainnet BIP84 watch-only account extended public key (zpub..., or xpub/ypub).
 PROD_BTC_XPUB=
 # Mainnet Monero primary address (starts with 4, 95 characters), private view key
@@ -44,11 +64,12 @@ PROD_XMR_ADDRESS=
 PROD_XMR_PRIVATE_VIEW_KEY=
 PROD_XMR_RESTORE_HEIGHT=
 
-# Optional isolated test tenant (test@pay.internal -> store "arkfile-test").
-# Leave ENABLE_TEST_TENANT=false and TEST_BTC_XPUB empty for single-tenant prod
-# deployments. Setting ENABLE_TEST_TENANT=true or supplying TEST_BTC_XPUB enables
-# the second isolated non-superuser tenant. Use a separate mainnet BIP84 account
-# zpub and separate Monero wallet/account from prod.
+# Isolated test tenant (test@pay.internal -> store "arkfile-test").
+# Leave ENABLE_TEST_TENANT=false and every TEST_* field empty for a prod-only
+# deployment. Setting ENABLE_TEST_TENANT=true, supplying TEST_BTC_XPUB, or
+# supplying any TEST_XMR_* field enables the test tenant. When both tenants
+# are enabled, use a separate mainnet BIP84 account zpub and a separate Monero
+# wallet or account from prod.
 ENABLE_TEST_TENANT=false
 TEST_BTC_XPUB=
 TEST_XMR_ADDRESS=

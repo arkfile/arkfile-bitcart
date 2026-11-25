@@ -139,13 +139,39 @@ validate_xmr_watch_only() {
 	fi
 }
 
+# True when this tenant prefix has any watch-only field set. Empty fields do
+# not request the tenant. A partial set still requests it so validation can
+# fail closed instead of provisioning from an incomplete config.
+tenant_has_watch_only_keys() {
+	local prefix="$1"
+	local btc_var="${prefix}_BTC_XPUB"
+	local addr_var="${prefix}_XMR_ADDRESS"
+	local view_var="${prefix}_XMR_PRIVATE_VIEW_KEY"
+	local height_var="${prefix}_XMR_RESTORE_HEIGHT"
+	[[ -n "${!btc_var:-}" || -n "${!addr_var:-}" || -n "${!view_var:-}" || -n "${!height_var:-}" ]]
+}
+
+is_prod_tenant_enabled() {
+	tenant_has_watch_only_keys "PROD"
+}
+
 is_test_tenant_enabled() {
 	local flag="${ENABLE_TEST_TENANT:-false}"
 	flag="$(printf '%s' "${flag}" | tr '[:upper:]' '[:lower:]')"
-	if [[ "${flag}" == "true" || -n "${TEST_BTC_XPUB:-}" ]]; then
+	if [[ "${flag}" == "true" ]]; then
 		return 0
 	fi
-	return 1
+	# TEST_BTC_XPUB set implies test, as do any TEST_XMR_* watch-only fields.
+	tenant_has_watch_only_keys "TEST"
+}
+
+validate_enabled_tenant() {
+	local prefix="$1"
+	local btc_var="${prefix}_BTC_XPUB"
+	validate_btc_xpub "${btc_var}" "${!btc_var:-}"
+	if has_crypto "xmr"; then
+		validate_xmr_watch_only "${prefix}"
+	fi
 }
 
 validate_operator_conf() {
@@ -196,18 +222,21 @@ validate_operator_conf() {
 		die "BITCART_LOG_RETENTION_DAYS must be a positive integer."
 	fi
 
-	validate_btc_xpub "PROD_BTC_XPUB" "${PROD_BTC_XPUB:-}"
-
 	if has_crypto "xmr"; then
 		[[ -n "${XMR_SERVER}" ]] || die "XMR_SERVER must be set when xmr is enabled."
-		validate_xmr_watch_only "PROD"
 	fi
 
+	if ! is_prod_tenant_enabled && ! is_test_tenant_enabled; then
+		die "At least one of prod or test watch-only keys is required in ${OPERATOR_CONF}."
+	fi
+
+	# Requested tenants must pass watch-only checks. Empty fields on a tenant
+	# that was not requested are skipped. A partial requested tenant fails closed.
+	if is_prod_tenant_enabled; then
+		validate_enabled_tenant "PROD"
+	fi
 	if is_test_tenant_enabled; then
-		validate_btc_xpub "TEST_BTC_XPUB" "${TEST_BTC_XPUB:-}"
-		if has_crypto "xmr"; then
-			validate_xmr_watch_only "TEST"
-		fi
+		validate_enabled_tenant "TEST"
 	fi
 }
 

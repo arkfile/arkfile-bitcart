@@ -1,6 +1,6 @@
 # arkfile-bitcart
 
-`arkfile-bitcart` is a standalone, security- and privacy-hardened deployment repository for hosting a mainnet-only Bitcart payment server (`pay.example.com` or any operator-supplied domain) on a small AlmaLinux 10 VPS (targeting 1 vCPU / 2 GB RAM) to process Bitcoin (BTC) and Monero (XMR) invoice top-ups for Arkfile deployments. It supports a primary `prod` tenant (`files.example.com`) and an optional isolated `test` tenant (`test.example.com`) on the same Bitcart stack using separate non-superuser Bitcart merchant accounts.
+`arkfile-bitcart` is a standalone, security- and privacy-hardened deployment repository for hosting a mainnet-only Bitcart payment server (`pay.example.com` or any operator-supplied domain) on a small AlmaLinux 10 VPS (targeting 1 vCPU / 2 GB RAM) to process Bitcoin (BTC) and Monero (XMR) invoice top-ups for Arkfile deployments. Prod-only, test-only, and both are valid on the same Bitcart stack, using separate non-superuser Bitcart merchant accounts (`prod` for `files.example.com`, `test` for `test.example.com`). A tenant is provisioned only when that tenant's watch-only keys are set, and at least one tenant's watch-only keys are required. A test-only first deploy validates the stack against a test Arkfile host before any `PROD_*` wallet keys are placed on the VPS. Filling `PROD_*` later and running `scripts/update.sh` creates only the missing prod tenant and preserves the existing tenant's PostgreSQL data, wallets, store, and `invoice_management` token.
 
 ## Architecture and Security Model
 
@@ -33,9 +33,9 @@ This VPS never runs local blockchain full nodes (`bitcoind`, `electrs`, `fulcrum
 
 1. **VPS:** Provision a fresh AlmaLinux 10 x86_64 VPS with at least 1 vCPU, 2 GB RAM, and 20 GB disk on any standard VPS provider, with `SELinux=enforcing` active. `scripts/host-setup.sh` creates a 2 GiB `/swapfile` (`vm.swappiness=20`) automatically if swap is not already configured.
 2. **DNS:** Create a public `A` record (and optional `AAAA` record) pointing `pay.example.com` to your VPS IP address and wait for propagation before running `scripts/deploy.sh` so host Caddy can obtain a Let's Encrypt TLS 1.3 certificate.
-3. **Watch-Only Mainnet Wallet Keys:** Prepare watch-only keys offline on your own hardware or software wallet. Never put private spending keys (`xprv`, `yprv`, `zprv`, `tprv`, `uprv`, `vprv`) or seed phrases on this VPS.
-   - **Bitcoin:** Export a mainnet BIP84 watch-only account extended public key (`zpub...`). If you enable the optional `test` tenant, use a separate BIP84 account `zpub` (for example `m/84'/0'/1'`) so `prod` and `test` invoice addresses and BIP84 gap limits remain completely independent.
-   - **Monero:** Export the mainnet primary address (starts with `4`, 95 characters), private view key (64 hexadecimal characters), and a recent integer block restore height. If you enable the optional `test` tenant, use a separate Monero wallet/account from `prod`.
+3. **Watch-Only Mainnet Wallet Keys:** Prepare watch-only keys offline on your own hardware or software wallet. Never put private spending keys (`xprv`, `yprv`, `zprv`, `tprv`, `uprv`, `vprv`) or seed phrases on this VPS. Prod-only, test-only, and both are valid, and at least one tenant's watch-only keys are required. A test-only first deploy is how you validate this stack against a test Arkfile host (`test.example.com`) before filling any `PROD_*` keys.
+   - **Bitcoin:** Export a mainnet BIP84 watch-only account extended public key (`zpub...`). When both tenants are enabled, use a separate BIP84 account `zpub` for each tenant (for example `m/84'/0'/0'` and `m/84'/0'/1'`) so invoice addresses and BIP84 gap limits stay independent.
+   - **Monero:** Export the mainnet primary address (starts with `4`, 95 characters), private view key (64 hexadecimal characters), and a recent integer block restore height. When both tenants are enabled, use a separate Monero wallet or account for each tenant. When `xmr` is enabled, a requested tenant must include the address, the view key, and an integer restore height if a height is set. A partial tenant config is rejected.
 
 ## Initial Deployment
 
@@ -47,27 +47,28 @@ sudo install -m 0600 bitcart.conf.example /etc/arkfile-bitcart/bitcart.conf
 sudoedit /etc/arkfile-bitcart/bitcart.conf
 ```
 
-Keep `BTC_TX_SPEED >= 1` and `XMR_TX_SPEED >= 5` in `/etc/arkfile-bitcart/bitcart.conf` because Arkfile enforces at least 1 confirmation for BTC and at least 5 confirmations for XMR at invoice creation time. To enable an isolated `test` tenant alongside `prod`, set `ENABLE_TEST_TENANT=true` and populate `TEST_BTC_XPUB` (and `TEST_XMR_*` when `xmr` is enabled).
+Keep `BTC_TX_SPEED >= 1` and `XMR_TX_SPEED >= 5` in `/etc/arkfile-bitcart/bitcart.conf` because Arkfile enforces at least 1 confirmation for BTC and at least 5 confirmations for XMR at invoice creation time. Fill `TEST_BTC_XPUB` (and `TEST_XMR_*` when `xmr` is enabled) and leave every `PROD_*` wallet field empty to validate against a test Arkfile host (`test.example.com`) before any production keys are on this VPS. `ENABLE_TEST_TENANT=true` also requests the test tenant. A prod-only deployment instead fills `PROD_*`, leaves every `TEST_*` field empty, and sets `ENABLE_TEST_TENANT=false`. Setting keys for both tenants enables both. At least one tenant's watch-only keys are required, and a partial tenant config is rejected.
 
-Run the deployment orchestrator (add `--check-prod-invoice` on initial setup if you want `scripts/verify.sh` to create one live test invoice against `prod` to confirm end-to-end checkout rendering and confirmation floors):
+Run the deployment orchestrator. On a test-only first deploy, do not pass `--check-prod-invoice`. `scripts/verify.sh` creates one live invoice against the test store when test is enabled, and it creates a live prod invoice only when prod is enabled and `--check-prod-invoice` is passed. A prod-only deployment still refuses that live prod invoice unless the flag is passed. Passing `--check-prod-invoice` while prod is not enabled fails with an error.
 
 ```bash
-sudo bash scripts/deploy.sh --check-prod-invoice
+sudo bash scripts/deploy.sh
 ```
 
-`scripts/deploy.sh` performs host setup, verifies rootless `overlay` storage, generates internal secrets under `/home/bitcart/secrets/` (`0600`), installs Quadlet units and Caddy configs, seeds Electrum's `/data/config`, starts the stack, provisions the isolated Bitcart accounts (`superadmin@pay.internal`, `prod@pay.internal`, and optionally `test@pay.internal`), writes ready-to-copy Arkfile snippets under `/root/arkfile-bitcart-credentials/` (`0600`), and runs `scripts/verify.sh`.
+After the test tenant works, add production by filling the `PROD_*` watch-only keys in `/etc/arkfile-bitcart/bitcart.conf` and running `sudo bash scripts/update.sh`. That creates only the missing prod tenant and preserves the test tenant's PostgreSQL data, wallets, store, and `invoice_management` token. The same update path adds a missing test tenant later if you started prod-only.
+
+`scripts/deploy.sh` performs host setup, verifies rootless `overlay` storage, generates internal secrets under `/home/bitcart/secrets/` (`0600`), installs Quadlet units and Caddy configs, seeds Electrum's `/data/config`, starts the stack, provisions `superadmin@pay.internal` plus each tenant whose watch-only keys are set (`prod@pay.internal` and/or `test@pay.internal`), writes ready-to-copy Arkfile snippets under `/root/arkfile-bitcart-credentials/` (`0600`), and runs `scripts/verify.sh`. Tenant admin passwords are generated for both tenants in `/home/bitcart/secrets/accounts.env` even when only one tenant is created, so a later enable reuses the same password.
 
 ## Connecting Arkfile Deployments
 
 Read the generated mode-`0600` credential snippets on the Bitcart VPS:
 
 ```bash
-sudo cat /root/arkfile-bitcart-credentials/prod-secrets.env
-# If the optional test tenant is enabled:
 sudo cat /root/arkfile-bitcart-credentials/test-secrets.env
+sudo cat /root/arkfile-bitcart-credentials/prod-secrets.env
 ```
 
-Copy the generated snippet as-is into the existing `/opt/arkfile/etc/secrets.env` on your production Arkfile host (`files.example.com`) and, if enabled, the `test` snippet into the existing `secrets.env` on your test Arkfile host (`test.example.com`). Do not replace the rest of `secrets.env`. The snippet already uses the names Arkfile reads (`ARKFILE_PAYMENTS_ENABLED`, `ARKFILE_MIN_TOP_UP_USD`, `ARKFILE_MAX_TOP_UP_USD`, `ARKFILE_BITCART_API_URL`, `ARKFILE_BITCART_CHECKOUT_URL`, `ARKFILE_BITCART_STORE_ID`, and `ARKFILE_BITCART_API_TOKEN`). The default top-up limits are `0.50` and `1000.00`; edit those two lines in the snippet before applying it if you want different limits. Apply the configuration on each Arkfile host using your standard deployment script (`prod-update.sh`, `test-update.sh`, or `local-deploy.sh`), then run `arkfile-admin payments check` on each Arkfile host to confirm end-to-end API connectivity and store configuration.
+Copy the snippet for each enabled tenant as-is into the existing `/opt/arkfile/etc/secrets.env` on that tenant's Arkfile host: `test-secrets.env` on the test Arkfile host (`test.example.com`) and `prod-secrets.env` on the production Arkfile host (`files.example.com`). On a test-only deploy only the test snippet exists. Do not replace the rest of `secrets.env`. The snippet already uses the names Arkfile reads (`ARKFILE_PAYMENTS_ENABLED`, `ARKFILE_MIN_TOP_UP_USD`, `ARKFILE_MAX_TOP_UP_USD`, `ARKFILE_BITCART_API_URL`, `ARKFILE_BITCART_CHECKOUT_URL`, `ARKFILE_BITCART_STORE_ID`, and `ARKFILE_BITCART_API_TOKEN`). The default top-up limits are `0.50` and `1000.00`; edit those two lines in the snippet before applying it if you want different limits. Apply the configuration on each Arkfile host using your standard deployment script (`prod-update.sh`, `test-update.sh`, or `local-deploy.sh`), then run `arkfile-admin payments check` on each Arkfile host to confirm end-to-end API connectivity and store configuration.
 
 Note that `bitcart-worker` logging a caught `RendererUnavailableError` immediately after `Sending IPN ... success` is expected because the optional chat/email template renderer sidecar is intentionally omitted to save RAM on a 2 GB VPS.
 
@@ -106,7 +107,7 @@ To apply updated images or configuration changes non-destructively while preserv
 sudo bash scripts/update.sh
 ```
 
-By default, `scripts/update.sh` runs `scripts/verify.sh` without creating live invoices against the `prod` store so repeated updates never burn through Bitcoin's 20-address BIP84 gap limit. Existing valid Arkfile API tokens are preserved unless `--rotate-tokens` is explicitly passed.
+By default, `scripts/update.sh` runs `scripts/verify.sh` without creating live invoices against the `prod` store so repeated updates never burn through Bitcoin's 20-address BIP84 gap limit. When test is enabled, verification creates one live test-store invoice. A live prod invoice is created only when prod is enabled and you pass `--check-prod-invoice`. Existing valid Arkfile API tokens are preserved unless `--rotate-tokens` is explicitly passed. To add the other tenant after a test-only or prod-only deploy, fill that tenant's watch-only keys and run `scripts/update.sh` again. The run creates only the missing tenant and leaves the existing tenant's PostgreSQL data, wallets, store, and `invoice_management` token in place.
 
 ## Backups and Restore
 

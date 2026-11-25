@@ -18,7 +18,8 @@ while [[ $# -gt 0 ]]; do
 			cat <<'EOF'
 Usage: sudo bash scripts/verify.sh [options]
   --check-prod-invoice  Create one live test invoice against prod (omit during routine updates
-                        to avoid consuming Bitcoin's 20-address BIP84 gap limit)
+                        to avoid consuming Bitcoin's 20-address BIP84 gap limit).
+                        Fails if the prod tenant is not enabled.
 EOF
 			exit 0
 			;;
@@ -280,16 +281,36 @@ check_live_invoice() {
 	fi
 }
 
+check_anonymous_invoice_rejected() {
+	local env_name="$1"
+	local store_id="$2"
+	local payload
+	payload="$(jq -n --arg sid "${store_id}" '{price: 1, currency: "USD", store_id: $sid}')"
+	public_request "POST" "/api/invoices" "" "${payload}"
+	if [[ "${HTTP_STATUS}" == "403" ]]; then
+		pass "Unauthenticated POST /api/invoices against ${env_name} store returned 403."
+	else
+		fail "Unauthenticated POST /api/invoices against ${env_name} store returned HTTP ${HTTP_STATUS} (expected 403)."
+	fi
+}
+
 main() {
+	if [[ "${CHECK_PROD_INVOICE}" == "true" ]] && ! is_prod_tenant_enabled; then
+		die "--check-prod-invoice was passed, but the prod tenant is not enabled. Set prod watch-only keys in ${OPERATOR_CONF} before requesting a live prod invoice."
+	fi
+
 	check_host_and_rootless
 
-	local prod_file="${BITCART_SECRETS_DIR}/prod-arkfile.env"
-	[[ -f "${prod_file}" ]] || die "Missing ${prod_file}. Run scripts/provision.sh first."
-	local prod_store prod_tok
-	prod_store="$(read_existing_key "${prod_file}" "BITCART_STORE_ID")"
-	prod_tok="$(read_existing_key "${prod_file}" "BITCART_API_TOKEN")"
-
+	local prod_store="" prod_tok=""
 	local test_store="" test_tok=""
+
+	# Credential files are required only for enabled tenants.
+	if is_prod_tenant_enabled; then
+		local prod_file="${BITCART_SECRETS_DIR}/prod-arkfile.env"
+		[[ -f "${prod_file}" ]] || die "Missing ${prod_file}. Run scripts/provision.sh first."
+		prod_store="$(read_existing_key "${prod_file}" "BITCART_STORE_ID")"
+		prod_tok="$(read_existing_key "${prod_file}" "BITCART_API_TOKEN")"
+	fi
 	if is_test_tenant_enabled; then
 		local test_file="${BITCART_SECRETS_DIR}/test-arkfile.env"
 		[[ -f "${test_file}" ]] || die "Missing ${test_file}. Run scripts/provision.sh first."
@@ -297,12 +318,22 @@ main() {
 		test_tok="$(read_existing_key "${test_file}" "BITCART_API_TOKEN")"
 	fi
 
-	# 1. Authenticated and unauthenticated /api/invoices/count checks.
-	public_request "GET" "/api/invoices/count" "${prod_tok}"
-	if [[ "${HTTP_STATUS}" == "200" ]]; then
-		pass "GET /api/invoices/count with prod token returned 200."
+	# Use the prod invoice_management token when prod is enabled, otherwise test.
+	local scope_name scope_tok
+	if is_prod_tenant_enabled; then
+		scope_name="prod"
+		scope_tok="${prod_tok}"
 	else
-		fail "GET /api/invoices/count with prod token returned HTTP ${HTTP_STATUS} (expected 200)."
+		scope_name="test"
+		scope_tok="${test_tok}"
+	fi
+
+	# 1. Authenticated and unauthenticated /api/invoices/count checks.
+	public_request "GET" "/api/invoices/count" "${scope_tok}"
+	if [[ "${HTTP_STATUS}" == "200" ]]; then
+		pass "GET /api/invoices/count with ${scope_name} token returned 200."
+	else
+		fail "GET /api/invoices/count with ${scope_name} token returned HTTP ${HTTP_STATUS} (expected 200)."
 	fi
 
 	public_request "GET" "/api/invoices/count"
@@ -312,34 +343,30 @@ main() {
 		fail "GET /api/invoices/count without token returned HTTP ${HTTP_STATUS} (expected 401)."
 	fi
 
-	# 2. Store checkout settings and enabled coins.
-	check_store_config "prod" "${prod_store}" "${prod_tok}"
+	# 2. Store and checkout settings for every enabled tenant, plus enabled coins.
+	if is_prod_tenant_enabled; then
+		check_store_config "prod" "${prod_store}" "${prod_tok}"
+	fi
 	if is_test_tenant_enabled; then
 		check_store_config "test" "${test_store}" "${test_tok}"
 	fi
 	check_enabled_cryptos
 
-	# 3. Unauthenticated invoice creation must be rejected (403).
-	local anon_prod_payload
-	anon_prod_payload="$(jq -n --arg sid "${prod_store}" '{price: 1, currency: "USD", store_id: $sid}')"
-	public_request "POST" "/api/invoices" "" "${anon_prod_payload}"
-	if [[ "${HTTP_STATUS}" == "403" ]]; then
-		pass "Unauthenticated POST /api/invoices against prod store returned 403."
-	else
-		fail "Unauthenticated POST /api/invoices against prod store returned HTTP ${HTTP_STATUS} (expected 403)."
+	# 3. Unauthenticated invoice creation must be rejected (403) for every enabled tenant.
+	if is_prod_tenant_enabled; then
+		check_anonymous_invoice_rejected "prod" "${prod_store}"
+	fi
+	if is_test_tenant_enabled; then
+		check_anonymous_invoice_rejected "test" "${test_store}"
 	fi
 
-	if is_test_tenant_enabled; then
-		local anon_test_payload
+	# 4. Cross-tenant isolation checks only when both tenants are enabled.
+	# These probes must return 403 and must not create a real invoice.
+	if is_prod_tenant_enabled && is_test_tenant_enabled; then
+		local anon_prod_payload anon_test_payload
+		anon_prod_payload="$(jq -n --arg sid "${prod_store}" '{price: 1, currency: "USD", store_id: $sid}')"
 		anon_test_payload="$(jq -n --arg sid "${test_store}" '{price: 1, currency: "USD", store_id: $sid}')"
-		public_request "POST" "/api/invoices" "" "${anon_test_payload}"
-		if [[ "${HTTP_STATUS}" == "403" ]]; then
-			pass "Unauthenticated POST /api/invoices against test store returned 403."
-		else
-			fail "Unauthenticated POST /api/invoices against test store returned HTTP ${HTTP_STATUS} (expected 403)."
-		fi
 
-		# 4. Cross-tenant isolation checks.
 		public_request "POST" "/api/invoices" "${test_tok}" "${anon_prod_payload}"
 		if [[ "${HTTP_STATUS}" == "403" ]]; then
 			pass "Cross-tenant POST /api/invoices (test token -> prod store) returned 403."
@@ -355,18 +382,19 @@ main() {
 		fi
 	fi
 
-	# 5. Blocked public routes must return 404 even with a valid prod bearer token.
+	# 5. Blocked public routes must return 404. Authenticated checks use a real
+	# invoice_management token (prod when enabled, otherwise test).
 	check_blocked_route "GET" "/" "" "" "GET /"
 	check_blocked_route "GET" "/admin" "" "" "GET /admin"
 	check_blocked_route "POST" "/api/token" "" '{"email":"superadmin@pay.internal","password":"invalid"}' "POST /api/token"
-	check_blocked_route "POST" "/api/invoices/batch" "${prod_tok}" '{"ids":["00000000000000000000000000"],"command":"mark_complete"}' "POST /api/invoices/batch (with prod token)"
-	check_blocked_route "GET" "/api/invoices/export" "${prod_tok}" "" "GET /api/invoices/export (with prod token)"
+	check_blocked_route "POST" "/api/invoices/batch" "${scope_tok}" '{"ids":["00000000000000000000000000"],"command":"mark_complete"}' "POST /api/invoices/batch (with ${scope_name} invoice_management token)"
+	check_blocked_route "GET" "/api/invoices/export" "${scope_tok}" "" "GET /api/invoices/export (with ${scope_name} invoice_management token)"
 	check_blocked_route "PATCH" "/api/invoices/00000000000000000000000000/customer" "" '{"buyer_email":"attacker@example.com"}' "PATCH /api/invoices/{id}/customer"
 	check_blocked_route "PATCH" "/api/invoices/00000000000000000000000000/details" "" '{"shipping_address":"none"}' "PATCH /api/invoices/{id}/details"
-	check_blocked_route "GET" "/api/wallets" "${prod_tok}" "" "GET /api/wallets (with prod token)"
-	check_blocked_route "GET" "/api/users" "${prod_tok}" "" "GET /api/users (with prod token)"
+	check_blocked_route "GET" "/api/wallets" "${scope_tok}" "" "GET /api/wallets (with ${scope_name} invoice_management token)"
+	check_blocked_route "GET" "/api/users" "${scope_tok}" "" "GET /api/users (with ${scope_name} invoice_management token)"
 
-	# 6. Live invoice check (test store by default; prod only when --check-prod-invoice is passed).
+	# 6. Live invoice check (test store when test is enabled; prod only with --check-prod-invoice).
 	if is_test_tenant_enabled; then
 		check_live_invoice "test" "${test_store}" "${test_tok}"
 	else
@@ -375,7 +403,7 @@ main() {
 
 	if [[ "${CHECK_PROD_INVOICE}" == "true" ]]; then
 		check_live_invoice "prod" "${prod_store}" "${prod_tok}"
-	else
+	elif is_prod_tenant_enabled; then
 		log_info "Skipping live prod invoice creation to preserve Bitcoin BIP84 gap limit (pass --check-prod-invoice to run)."
 	fi
 
