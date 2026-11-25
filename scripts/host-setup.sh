@@ -111,13 +111,40 @@ ensure_subid_range() {
 	' "${subfile}")"
 
 	printf '%s:%s:65536\n' "${user}" "${next_start}" >> "${subfile}"
+	SUBID_CHANGED=true
 	log_ok "Allocated ${user}:${next_start}:65536 in ${subfile}."
 }
 
+# podman system migrate stops all containers and races systemd Restart=on-failure
+# if run while units are active or auto-restarting.
+migrate_rootless_podman() {
+	local list unit
+	local -a managed_units=()
+	list="$(run_bitcart_systemctl list-units --type=service --state=active,activating --no-legend --no-pager 'bitcart-*.service' | awk '{print $1}')"
+	while IFS= read -r unit; do
+		[[ -n "${unit}" ]] || continue
+		managed_units+=("${unit}")
+	done <<< "${list}"
+
+	if ((${#managed_units[@]} > 0)); then
+		log_info "Stopping bitcart units before podman system migrate: ${managed_units[*]}"
+		run_bitcart_systemctl stop "${managed_units[@]}"
+	fi
+
+	run_bitcart_podman system migrate
+
+	if ((${#managed_units[@]} > 0)); then
+		log_info "Starting bitcart units stopped for podman system migrate."
+		run_bitcart_systemctl start "${managed_units[@]}"
+	fi
+}
+
 ensure_bitcart_account() {
+	local user_created=false
 	if ! id -u "${BITCART_USER}" >/dev/null 2>&1; then
 		useradd --create-home --home-dir "${BITCART_HOME}" --shell /sbin/nologin "${BITCART_USER}"
 		passwd -l "${BITCART_USER}" >/dev/null 2>&1 || true
+		user_created=true
 		log_ok "Created dedicated unprivileged user ${BITCART_USER}."
 	else
 		log_ok "User ${BITCART_USER} already exists."
@@ -129,6 +156,7 @@ ensure_bitcart_account() {
 		rm -f "${BITCART_HOME}/.ssh/authorized_keys"
 	fi
 
+	SUBID_CHANGED=false
 	ensure_subid_range /etc/subuid "${BITCART_USER}"
 	ensure_subid_range /etc/subgid "${BITCART_USER}"
 
@@ -138,7 +166,17 @@ ensure_bitcart_account() {
 	systemctl start "user@${uid}.service"
 
 	ensure_bitcart_user_ready
-	run_bitcart_podman system migrate
+	local active_units running_containers
+	active_units="$(run_bitcart_systemctl list-units --type=service --state=active,activating --no-legend --no-pager 'bitcart-*.service' | awk '{print $1}')"
+	running_containers="$(run_bitcart_podman ps -q)"
+
+	if [[ "${user_created}" == "true" || "${SUBID_CHANGED}" == "true" ]]; then
+		migrate_rootless_podman
+	elif [[ -z "${active_units}" && -z "${running_containers}" ]]; then
+		run_bitcart_podman system migrate
+	else
+		log_ok "Rootless containers are running and subuid/subgid are unchanged; skipping podman system migrate."
+	fi
 	verify_rootless_overlay
 }
 
