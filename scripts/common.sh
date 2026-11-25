@@ -422,6 +422,7 @@ BITCART_BACKEND_PLUGINS_DIR=/plugins/backend
 BITCART_ADMIN_PLUGINS_DIR=/plugins/admin
 BITCART_STORE_PLUGINS_DIR=/plugins/store
 BITCART_DOCKER_PLUGINS_DIR=/plugins/docker
+BITCART_VOLUMES=/datadir /backups /plugins
 EOF
 
 	write_bitcart_secret_file "${BITCART_SECRETS_DIR}/checkout.env" <<EOF

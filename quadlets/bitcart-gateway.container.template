@@ -12,8 +12,8 @@ PublishPort=127.0.0.1:29080:29080
 Volume=/home/bitcart/config/Caddyfile.gateway:/etc/caddy/Caddyfile:ro,Z
 DropCapability=ALL
 # The official Caddy image has a file capability on /usr/bin/caddy, so no-new-privileges makes execve return EPERM.
-# caddy:alpine includes curl and has no wget.
-HealthCmd=curl -fsS -o /dev/null http://127.0.0.1:29080/api/cryptos
+# docker.io/library/caddy:2.11.4-alpine is Alpine/BusyBox, which includes wget and does not include curl.
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:29080/api/cryptos
 HealthInterval=20s
 HealthTimeout=5s
 HealthRetries=5

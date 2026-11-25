@@ -16,7 +16,7 @@ Volume=bitcart-datadir.volume:/datadir
 Volume=bitcart-backups.volume:/backups
 Volume=bitcart-plugins.volume:/plugins
 DropCapability=ALL
-AddCapability=CHOWN DAC_OVERRIDE SETGID SETUID
+AddCapability=CHOWN DAC_OVERRIDE FOWNER SETGID SETUID
 HealthCmd=python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/cryptos',timeout=3).read()"
 HealthInterval=15s
 HealthTimeout=5s

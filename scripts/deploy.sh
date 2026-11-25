@@ -72,10 +72,10 @@ main() {
 		run_bitcart_systemctl start "${unit}.service"
 	done
 
-	run_bitcart_systemctl start bitcart-backend.service
-	run_bitcart_systemctl start bitcart-worker.service
-	run_bitcart_systemctl start bitcart-checkout.service
-	run_bitcart_systemctl start bitcart-gateway.service
+	run_bitcart_systemctl restart bitcart-backend.service
+	run_bitcart_systemctl restart bitcart-worker.service
+	run_bitcart_systemctl restart bitcart-checkout.service
+	run_bitcart_systemctl restart bitcart-gateway.service
 
 	log_info "Step 6: Enabling and restarting host caddy.service..."
 	systemctl enable --now caddy.service
