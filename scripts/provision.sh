@@ -2,8 +2,8 @@
 # Idempotent Bitcart API provisioner for arkfile-bitcart.
 # Talks exclusively to http://127.0.0.1:29080/api and configures:
 #   - superadmin@pay.internal (superuser, global policy lockdown only)
-#   - prod@pay.internal when prod watch-only keys are set (store "arkfile-prod")
-#   - test@pay.internal when test watch-only keys are set (store "arkfile-test")
+#   - prod@pay.internal when prod watch-only keys are set (store PROD_STORE_NAME or "arkfile-prod")
+#   - test@pay.internal when test watch-only keys are set (store TEST_STORE_NAME or "arkfile-test")
 # A tenant that is not requested on this run is left in place.
 
 set -euo pipefail
@@ -124,8 +124,10 @@ api_request() {
 validate_public_store_json() {
 	local store_json="$1"
 	local expected_btc_speed="$2"
+	local expected_name="${3:-}"
 
-	jq -e --argjson btc_speed "${expected_btc_speed}" '
+	jq -e --argjson btc_speed "${expected_btc_speed}" --arg name "${expected_name}" '
+		($name == "" or .name == $name) and
 		((.default_currency | ascii_upcase) == "USD") and
 		(.checkout_settings.expiration == 60) and
 		(.checkout_settings.transaction_speed == $btc_speed) and
@@ -142,8 +144,9 @@ validate_tenant_store_json() {
 	local expected_btc_speed="$2"
 	local btc_wallet_id="$3"
 	local xmr_wallet_id="${4:-}"
+	local expected_name="${5:-}"
 
-	validate_public_store_json "${store_json}" "${expected_btc_speed}" || return 1
+	validate_public_store_json "${store_json}" "${expected_btc_speed}" "${expected_name}" || return 1
 	if has_crypto "xmr" && [[ -z "${xmr_wallet_id}" ]]; then
 		return 1
 	fi
@@ -196,6 +199,8 @@ check_existing_token_valid() {
 	local env_name="$1"
 	local store_id="$2"
 	local token="$3"
+	local expected_name
+	expected_name="$(get_tenant_store_name "${env_name}")"
 
 	[[ -n "${token}" && -n "${store_id}" ]] || return 1
 
@@ -204,7 +209,7 @@ check_existing_token_valid() {
 
 	api_request "GET" "/stores/${store_id}" "${token}"
 	[[ "${HTTP_STATUS}" == "200" ]] || return 1
-	validate_public_store_json "${HTTP_BODY}" "${BTC_TX_SPEED}" || return 1
+	validate_public_store_json "${HTTP_BODY}" "${BTC_TX_SPEED}" "${expected_name}" || return 1
 	return 0
 }
 
@@ -457,12 +462,30 @@ provision_tenant() {
 	fi
 
 	# Create or update tenant USD store and checkout settings.
-	local store_name="arkfile-${env_name}"
+	local store_name default_store_name saved_file saved_store_id
+	store_name="$(get_tenant_store_name "${env_name}")"
+	default_store_name="arkfile-${env_name}"
+	saved_file="${BITCART_SECRETS_DIR}/${env_name}-arkfile.env"
+	saved_store_id="$(read_existing_key "${saved_file}" "BITCART_STORE_ID")"
+
 	api_request "GET" "/stores?limit=-1" "${tenant_token}"
 	[[ "${HTTP_STATUS}" == "200" ]] || die "Failed to list stores for ${env_name} (HTTP ${HTTP_STATUS}): ${HTTP_BODY}"
 
-	local store_id
-	store_id="$(jq -r --arg n "${store_name}" '.result[] | select(.name == $n) | .id' <<< "${HTTP_BODY}" | head -n 1 || true)"
+	# Resolve an existing tenant store by saved ID first so store renames update
+	# the existing store in place instead of creating a duplicate store.
+	local store_id=""
+	if [[ -n "${saved_store_id}" ]]; then
+		store_id="$(jq -r --arg sid "${saved_store_id}" '.result[] | select(.id == $sid) | .id' <<< "${HTTP_BODY}" | head -n 1 || true)"
+	fi
+	if [[ -z "${store_id}" ]]; then
+		store_id="$(jq -r --arg n "${store_name}" --arg default_name "${default_store_name}" '
+			(
+				([.result[] | select(.name == $n) | .id][0]) //
+				([.result[] | select(.name == $default_name) | .id][0]) //
+				(if (.result | length) == 1 then .result[0].id else null end)
+			) // empty
+		' <<< "${HTTP_BODY}")"
+	fi
 
 	local store_payload
 	store_payload="$(jq -n \
@@ -498,12 +521,11 @@ provision_tenant() {
 	# Verify checkout settings and attached wallet IDs on the DisplayStore response.
 	api_request "GET" "/stores/${store_id}" "${tenant_token}"
 	[[ "${HTTP_STATUS}" == "200" ]] || die "Failed to read store ${store_id} (HTTP ${HTTP_STATUS}): ${HTTP_BODY}"
-	validate_tenant_store_json "${HTTP_BODY}" "${BTC_TX_SPEED}" "${btc_wallet_id}" "${xmr_wallet_id:-}" \
+	validate_tenant_store_json "${HTTP_BODY}" "${BTC_TX_SPEED}" "${btc_wallet_id}" "${xmr_wallet_id:-}" "${store_name}" \
 		|| die "Store ${store_name} (${store_id}) failed checkout_settings or wallet verification: ${HTTP_BODY}"
 	log_ok "Verified store ${store_name} checkout_settings and attached wallets."
 
 	# Preserve existing valid invoice_management token unless --rotate-tokens was passed.
-	local saved_file="${BITCART_SECRETS_DIR}/${env_name}-arkfile.env"
 	local existing_tok=""
 	existing_tok="$(read_existing_key "${saved_file}" "BITCART_API_TOKEN")"
 

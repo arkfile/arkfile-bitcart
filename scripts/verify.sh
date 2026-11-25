@@ -139,8 +139,10 @@ check_host_and_rootless() {
 # least 1. currency_data is fiat divisibility and is not a coin map.
 validate_public_store_json() {
 	local store_json="$1"
+	local expected_name="${2:-}"
 
-	jq -e '
+	jq -e --arg name "${expected_name}" '
+		($name == "" or .name == $name) and
 		((.default_currency | ascii_upcase) == "USD") and
 		(.checkout_settings.expiration == 60) and
 		(.checkout_settings.transaction_speed >= 1) and
@@ -154,6 +156,8 @@ check_store_config() {
 	local env_name="$1"
 	local store_id="$2"
 	local token="$3"
+	local expected_name
+	expected_name="$(get_tenant_store_name "${env_name}")"
 
 	public_request "GET" "/api/stores/${store_id}" "${token}"
 	if [[ "${HTTP_STATUS}" != "200" ]]; then
@@ -161,10 +165,10 @@ check_store_config() {
 		return
 	fi
 
-	if validate_public_store_json "${HTTP_BODY}"; then
-		pass "${env_name} store settings verified (USD, expiration 60, BTC speed >= 1, underpaid=0, no email, no anonymous invoices)."
+	if validate_public_store_json "${HTTP_BODY}" "${expected_name}"; then
+		pass "${env_name} store settings verified (name '${expected_name}', USD, expiration 60, BTC speed >= 1, underpaid=0, no email, no anonymous invoices)."
 	else
-		fail "${env_name} store checkout settings check failed."
+		fail "${env_name} store checkout settings or display name check failed (expected name '${expected_name}')."
 	fi
 }
 

@@ -174,6 +174,31 @@ validate_enabled_tenant() {
 	fi
 }
 
+validate_store_name() {
+	local label="$1"
+	local val="$2"
+	[[ -n "${val}" ]] || return 0
+	if [[ -z "${val//[[:space:]]/}" ]]; then
+		die "${label} must not be blank whitespace."
+	fi
+	if (( ${#val} > 100 )); then
+		die "${label} must be 100 characters or fewer."
+	fi
+}
+
+get_tenant_store_name() {
+	local env_name="$1"
+	local env_upper
+	env_upper="$(printf '%s' "${env_name}" | tr '[:lower:]' '[:upper:]')"
+	local var_name="${env_upper}_STORE_NAME"
+	local custom="${!var_name:-}"
+	if [[ -n "${custom}" ]]; then
+		printf '%s' "${custom}"
+	else
+		printf 'arkfile-%s' "${env_name}"
+	fi
+}
+
 validate_operator_conf() {
 	PAY_DOMAIN="${PAY_DOMAIN:-}"
 	BITCART_CRYPTOS="${BITCART_CRYPTOS:-btc,xmr}"
@@ -225,6 +250,9 @@ validate_operator_conf() {
 	if has_crypto "xmr"; then
 		[[ -n "${XMR_SERVER}" ]] || die "XMR_SERVER must be set when xmr is enabled."
 	fi
+
+	validate_store_name "PROD_STORE_NAME" "${PROD_STORE_NAME:-}"
+	validate_store_name "TEST_STORE_NAME" "${TEST_STORE_NAME:-}"
 
 	if ! is_prod_tenant_enabled && ! is_test_tenant_enabled; then
 		die "At least one of prod or test watch-only keys is required in ${OPERATOR_CONF}."
